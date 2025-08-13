@@ -12,6 +12,32 @@ fail() { echo -e "${RED}❌ $*${NC}" >&2; exit 1; }
 info() { echo -e "${YELLOW}ℹ️  $*${NC}"; }
 ok() { echo -e "${GREEN}✅ $*${NC}"; }
 
+# Register required providers
+register_provider() {
+    local provider="$1"
+    info "Registering provider: $provider"
+    
+    # Check current status
+    local status
+    status=$(az provider show --namespace "$provider" --query registrationState -o tsv 2>/dev/null || echo "NotRegistered")
+    
+    if [[ "$status" != "Registered" ]]; then
+        az provider register --namespace "$provider" >/dev/null 2>&1 || true
+        # Wait for registration (max 5 minutes)
+        for i in {1..50}; do
+            status=$(az provider show --namespace "$provider" --query registrationState -o tsv 2>/dev/null || echo "NotRegistered")
+            if [[ "$status" == "Registered" ]]; then
+                ok "$provider registered successfully"
+                return 0
+            fi
+            sleep 6
+        done
+        fail "Failed to register $provider within timeout"
+    else
+        ok "$provider already registered"
+    fi
+}
+
 # Configuration
 PROJECT="aiagent"
 ENVIRONMENT="dev"
@@ -36,6 +62,11 @@ main() {
     # Get subscription info
     SUBSCRIPTION_ID=$(az account show --query id -o tsv)
     ok "Using subscription: $SUBSCRIPTION_ID"
+    
+    # Register required providers
+    register_provider "Microsoft.KeyVault"
+    register_provider "Microsoft.CognitiveServices"
+    register_provider "Microsoft.Resources"
     
     # Create Resource Group
     info "Creating Resource Group: $RESOURCE_GROUP"
